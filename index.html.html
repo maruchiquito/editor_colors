@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Editor de Imagen</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background:#f8f9fc; }
+    .container { background:white; padding:20px; border-radius:8px; max-width:900px; margin:auto; box-shadow:0 4px 10px rgba(0,0,0,0.1); }
+    h2 { margin-bottom:5px; }
+    p { margin-top:0; font-size:14px; color:#555; }
+    .row { margin: 10px 0; }
+    #canvas { border:1px dashed #ccc; display:block; margin-top:10px; max-width:100%; }
+    .palette-item {
+      display:flex; align-items:center; font-size:13px;
+      margin:2px 0; padding:2px 4px;
+    }
+    .color-box {
+      width:16px; height:16px; margin-left:6px; border:1px solid #ccc;
+    }
+    #paletteOriginal, #paletteProcesada {
+      max-height:150px; overflow-y:auto;
+      border:1px solid #ccc; border-radius:6px; padding:6px; margin-top:6px;
+    }
+    #statusInfo { margin-top:10px; font-size:14px; font-weight:bold; color:#333; }
+    button { padding:6px 12px; border:none; border-radius:6px; background:#007bff; color:white; cursor:pointer; }
+    button:hover { background:#0056b3; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>EDITOR DE IMAGEN</h2>
+  
+
+    <!-- 1. Cargar imagen -->
+    <div class="row">
+      <input id="fileInput" type="file" accept="image/*">
+      <strong style="margin-left:8px">Cargar imagen</strong>
+    </div>
+
+    <!-- 2. Vista previa -->
+    <canvas id="canvas" width="300" height="200"></canvas>
+
+    <!-- 3. Parámetros -->
+    <div class="row">
+      <label>Número de colores:</label>
+      <input id="numColors" type="number" min="2" max="256" value="4">
+    </div>
+    <div class="row">
+      <label>Ancho px:</label>
+      <input id="widthInput" type="number" min="1">
+    </div>
+    <div class="row">
+      <label>Alto px:</label>
+      <input id="heightInput" type="number" min="1">
+    </div>
+    <div class="row">
+      <label><input id="keepAspect" type="checkbox" checked> Mantener proporción</label>
+    </div>
+    <div class="row">
+      <button id="runBtn">Run</button>
+    </div>
+
+    <!-- 4. Estado -->
+    <div id="statusInfo"></div>
+
+    <!-- 5. Paletas -->
+    <div class="row">
+      <label>Colores originales:</label>
+      <div id="paletteOriginal"></div>
+    </div>
+
+    <div class="row">
+      <label>Colores procesados:</label>
+      <div id="paletteProcesada"></div>
+    </div>
+
+    <!-- 6. Descargar -->
+    <div class="row">
+      <button id="downloadBtn">Descargar imagen</button>
+    </div>
+  </div>
+
+  <script>
+  const fileInput = document.getElementById('fileInput');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const runBtn = document.getElementById('runBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const statusInfo = document.getElementById('statusInfo');
+  let img = new Image();
+
+  function rgbToHex(r, g, b) {
+    return "#" + [r, g, b].map(x => {
+      const h = x.toString(16);
+      return h.length === 1 ? "0" + h : h;
+    }).join("");
+  }
+
+  function hexToRgb(hex) {
+    let bigint = parseInt(hex.slice(1), 16);
+    return {
+      r: (bigint >> 16) & 255,
+      g: (bigint >> 8) & 255,
+      b: bigint & 255
+    };
+  }
+
+  function getSortedColorsWithCount(imageData) {
+    const data = imageData.data;
+    const counts = {};
+    for (let i = 0; i < data.length; i += 4) {
+      const hex = rgbToHex(data[i], data[i + 1], data[i + 2]);
+      counts[hex] = (counts[hex] || 0) + 1;
+    }
+    const total = data.length / 4;
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([hex, count]) => ({ hex, percent: ((count / total) * 100).toFixed(1) }));
+  }
+
+  function renderPalette(colors, containerId) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = "";
+    colors.forEach(c => {
+      const row = document.createElement("div");
+      row.className = "palette-item";
+      row.innerHTML = `${c.hex} (${c.percent}%) <div class="color-box" style="background:${c.hex}"></div>`;
+      container.appendChild(row);
+    });
+  }
+
+  function applyColorReduction(imageData, palette) {
+    const data = imageData.data;
+    const rgbPalette = palette.map(c => hexToRgb(c.hex));
+    for (let i = 0; i < data.length; i += 4) {
+      let r = data[i], g = data[i + 1], b = data[i + 2];
+      let best = rgbPalette[0];
+      let bestDist = Infinity;
+      for (const c of rgbPalette) {
+        let dist = (r - c.r) ** 2 + (g - c.g) ** 2 + (b - c.b) ** 2;
+        if (dist < bestDist) { bestDist = dist; best = c; }
+      }
+      data[i] = best.r;
+      data[i + 1] = best.g;
+      data[i + 2] = best.b;
+    }
+    return imageData;
+  }
+
+  // Cargar imagen
+  fileInput.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const hexOriginal = getSortedColorsWithCount(imageData);
+        renderPalette(hexOriginal, "paletteOriginal");
+        statusInfo.textContent = `Imagen cargada: ${img.width} x ${img.height}px | Colores detectados: ${hexOriginal.length}`;
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // Ejecutar reducción
+  runBtn.addEventListener('click', () => {
+    if (!img || !img.complete) return alert("Carga primero una imagen.");
+    let numColors = Math.max(2, Math.min(256, parseInt(document.getElementById('numColors').value) || 16));
+
+    // Redibujar imagen original antes de reducir
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    let uniqueColors = getSortedColorsWithCount(imageData);
+    const reduced = uniqueColors.slice(0, numColors);
+
+    // 🔹 aplicar reducción real de colores y volver a dibujar
+    let reducedData = applyColorReduction(imageData, reduced);
+    ctx.putImageData(reducedData, 0, 0);
+
+    renderPalette(reduced, "paletteProcesada");
+    statusInfo.textContent = `Imagen reducida a ${numColors} colores.`;
+  });
+
+  // Descargar
+  downloadBtn.addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.download = 'imagen_procesada.png';
+    link.href = canvas.toDataURL();
+    link.click();
+  });
+</script>
+
+</body>
+</html>

@@ -16,8 +16,3 @@ Todo el procesamiento se realiza 100% del lado del cliente (sin backend).
 
 Tecnologías utilizadas
 HTML5, CSS3, JavaScript, Canvas API
-
-
-Agregar una sección de capturas de pantalla
-
-O dejar el README con un tono más técnico o más casual
